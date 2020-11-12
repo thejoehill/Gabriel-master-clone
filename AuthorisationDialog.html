@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <?!= HtmlService.createHtmlOutputFromFile("DialogStylesheet").getContent(); ?>
+  </head>
+  <body>
+    <div id="root">
+      <div class="block">
+        <span>
+          Using this 'Add-On' means <a href="https://help.github.com/articles/connecting-with-third-party-applications/" target="_blank">connecting it to Github via OAuth</a>.
+          This happens the first time you click on 'Start Publishing', when you grant permissions for <a href="http://thiscouldbejd.github.io/Gabriel/" target="_blank">Gabriel</a> to publish to your repositories <strong>on your behalf</strong>.
+          Currently, this means you can only be 'signed' into a <strong>single account</strong> at any one time. If you would like to publish using a <strong>different account</strong>, you will need to click the button below to begin the authorisation process again.
+        </span>
+      </div>
+      <div class="block authorised">
+        <span class="gray" id="auth">
+          <span id="lead-in"> : </span><span>You have already <strong>authorised</strong> this add-on to access your GitHub Account.
+          You can view the details of this application on your <a href="https://github.com/settings/applications">GitHub</a> account.
+          If you would like to change the account you are using to access GitHub, please <strong>sign out</strong> of GitHub and click on the '<strong>Authorise</strong>' button below.
+          </span>
+        </span>
+      </div>
+      <div class="block">
+        <button class="action authorised" id="dialog-reauth-button">Authorise</button>
+        <button id="dialog-close-button">Close</button>
+      </div>
+    </div>
+    <?!= HtmlService.createHtmlOutputFromFile("AuthorisationDialogJavaScript").getContent(); ?>
+  </body>
+</html>

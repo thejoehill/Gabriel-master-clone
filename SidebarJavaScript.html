@@ -1,0 +1,415 @@
+<script src="//ajax.googleapis.com/ajax/libs/jquery/2.2.0/jquery.min.js"></script>
+<script>
+
+  var current_Targets = [];
+  var all_Tags = [];
+  var current_Tags = [];
+  
+  /**
+   * Run initializations on sidebar load.
+   */
+  $(function() {
+    
+    $("#sidebar-publish-button").attr("disabled","disabled");
+    
+    // Handler for Change Checkbox Function (keeping track of targets!)
+    $(document).on("change", "input[type='checkbox'].repos", onRepoCheckChange);
+    $(document).on("change", "input[type='checkbox'].tags", onTagCheckChange);
+    
+    // Handler for Changing Text Entry
+    $(document).on("change", "input[type='text']", validateData);
+    $(document).on("change", "textarea", validateData);
+    
+    // Handler for Metadata Generation Easter Egg (help/diagnosis tool)
+    $("#logo").click(function () {google.script.run.showDialog(generateMetadata(), "YAML Front-Matter / Metadata");});
+    
+    // Handler for Publishing Button on Side Bar
+    $("#sidebar-publish-button").click(function() {
+      showStatus("");
+      $("#sidebar-publish-button").attr("disabled","disabled");
+      saveMeta([commitDocument, afterPublishSuccess], afterPublishFailure);
+    });
+    
+    // Handler for Saving Button on Side Bar
+    $("#sidebar-save-button").click(function() {
+      showStatus("");
+      $("#sidebar-save-button").attr("disabled","disabled");
+      saveMeta([afterSaveSuccess], afterSaveFailure);
+    });
+    
+    // Handler for Clear Targets Button on Side Bar
+    $("#sidebar-clearcommits-button").click(function() {
+      current_Targets = [];
+      showTargets(current_Targets);
+      $("#repos input[type=checkbox]").attr("checked", false);
+      validateData();
+    });
+    
+    $("#sidebar-clear-button").click(function() {
+      google.script.run
+        .clearData();
+    });
+    
+    $("#new-tag").on("keyup", function(e) {
+        if (e.keyCode == 13) {
+          addTag($("#new-tag").val(), true);
+          $("#new-tag").val("")
+          return false; // prevent the button click from happening
+        }
+    });
+    
+    $("#sidebar-add-tag").click(function() {
+      addTag($("#new-tag").val(), true);
+      $("#new-tag").val("")
+    });
+    
+    // Handler for all 'Show more help' links
+    $(".trigger-help").click(function() {
+      $("#" + $(this).attr("for") + "-help").toggle();
+    });
+
+    // Load Current Github User Details
+    google.script.run
+      .withSuccessHandler(function(user) {
+        if (user && user.username) {
+          $("#header").prepend($("<span/>").addClass("user").text(user.username).click(function () {google.script.run.showAuthorisation();}));
+          $("#lead-in").show();
+        } else {
+          $("#lead-in").hide();
+        }
+      })
+      .getMe();
+    
+    // Begin A-Sync Load Chain!
+    loadMeta([loadAllTags, loadRepos, validateData]);
+    
+  });
+  
+  function addTag(value, selected) {
+    var success = false;
+    if (selected && current_Tags.indexOf(value) < 0) current_Tags.push(value);
+    var index = all_Tags.indexOf(value);
+    if (index < 0) {
+      all_Tags.push(value);
+      google.script.run
+        .withSuccessHandler(function() {
+          showTags(all_Tags);
+          success = true;
+        })
+        .setAllTags(all_Tags);
+      }
+    return success;
+  }
+  
+  function loadMeta(successfulChainFunctions) {
+    google.script.run
+      .withSuccessHandler(function(meta) {
+      
+        current_Tags = meta.tags; // Handle Selected Tags
+        $("#title-text").val(meta.title); // Handle Title
+        $("#file-name-text").val(meta.filename); // Handle Filename
+        $("#link-text").val(meta.link); // Handle Link
+        $("#type-text").val(meta.type); // Handle Type
+        $("#author-text").val(meta.author); // Handle Author
+        current_Targets = meta.targets;
+        showTargets(current_Targets);
+        
+        if (successfulChainFunctions && successfulChainFunctions.length > 0) 
+          successfulChainFunctions.shift()(successfulChainFunctions); // -- Continue the Chain -- //
+        
+      })
+      .getMeta();
+  }
+
+  function loadAllTags(successfulChainFunctions) {
+    showLoading($("#tags"), "Tags");
+    google.script.run
+      .withSuccessHandler(function(tags) {
+        all_Tags = tags;
+        showTags(tags);
+        
+        if (successfulChainFunctions && successfulChainFunctions.length > 0) 
+          successfulChainFunctions.shift()(successfulChainFunctions); // -- Continue the Chain -- //
+        
+      })
+      .getAllTags();
+  }
+  
+  function loadRepos(successfulChainFunctions) {
+    showLoading($("#repos"), "Repos");
+    google.script.run
+      .withSuccessHandler(function(repos, element) {
+          element.empty();
+          if (!repos || repos.length == 0) {
+            $("<div/>")
+              .append($("<span/>").addClass("err").text("You don't have any repos! "))
+              .append($("<span/>").addClass("gray").text("You'll need to create one before publishing anything."))
+              .appendTo(element);
+          } else {
+            for (var i = 0; i < repos.length; i++) {
+              $("<li/>")
+                .click(folderClick)
+                .data("path", "")
+                .data("repo_name", repos[i].fullname)
+                .append($("<input />").addClass("repos").attr("type","checkbox").attr("checked", (current_Targets.indexOf(repos[i].fullname + "::") >= 0)))
+                .append($("<span />").text(repos[i].name).click(folderClick))
+                .appendTo(element);
+            }
+          }
+          if (successfulChainFunctions && successfulChainFunctions.length > 0)
+            successfulChainFunctions.shift()(successfulChainFunctions); // -- Continue the Chain -- //
+        })
+      .withUserObject($("#repos"))
+      .getFilteredRepos();
+  }
+
+  function onRepoCheckChange() {
+    var parent = $(this).parent();
+    var data = parent.data("repo_name") + "::" + parent.data("path");
+    if(this.checked) {
+      current_Targets.push(data);
+    } else {
+      var index = current_Targets.indexOf(data);
+      if (index > -1) current_Targets.splice(index, 1);
+    }
+    showTargets(current_Targets);
+    validateData();
+  }
+  
+  function onTagCheckChange() {
+    var parent = $(this).parent();
+    var data = parent.data("name");
+    var index = current_Tags.indexOf(data);
+    if(this.checked) {
+      if (index < 0) current_Tags.push(data);
+    } else {
+      if (index > -1) current_Tags.splice(index, 1);
+    }
+  }
+  
+  function showTargets(targets) {
+    var commitTo = $("#commit-to-repos").empty();
+    if (!targets || targets.length == 0) {
+      $("#commit-to-repos-block").hide();
+    } else {
+      $("#commit-to-repos-block").show();
+      for (var i = 0; i < targets.length; i++) {
+        $("<li/>").text(targets[i]).appendTo(commitTo);
+      }
+    }
+  }
+  
+ function showTags(tags) {
+    var tagList = $("#tags").empty();
+    for (var i = 0; i < tags.length; i++) {
+      $("<li/>")
+        .data("name", tags[i])
+        .append($("<input />").addClass("tags").attr("type","checkbox").attr("checked", (current_Tags.indexOf(tags[i]) >= 0)))
+        .append($("<span />").text(tags[i]))
+        .append($("<a />").text("x").addClass("required delete").attr("title", "Delete Tag from your list").click((function(value) {
+          return function() {
+            var index = all_Tags.indexOf(value);
+            if (index > -1) {
+              all_Tags.splice(index, 1);
+              index = current_Tags.indexOf(value);
+              if (index > -1) current_Tags.splice(index, 1);
+              google.script.run
+                .withSuccessHandler(function() {
+                  showTags(all_Tags);
+                })
+              .setAllTags(all_Tags);
+            }
+          };
+        })(tags[i])))
+        .appendTo(tagList);
+    }
+  }
+  
+  function saveMeta(successfulChainFunctions, failedChainFunction) {
+  
+    var meta = {};
+    meta.title = $("#file-title-text").val();
+    meta.filename = $("#file-name-text").val();
+    meta.link = $("#link-text").val();
+    meta.type = $("#type-text").val();
+    meta.author = $("#author-text").val();
+    meta.targets = current_Targets;
+    meta.tags = current_Tags;
+    
+    google.script.run
+      .withSuccessHandler(function() {
+      
+        // -- Continue the Chain -- //
+        if (successfulChainFunctions && successfulChainFunctions.length > 0) {
+          var successfulChainFunction = successfulChainFunctions.shift();
+          successfulChainFunction(successfulChainFunctions, failedChainFunction);
+        }
+        
+      })
+      .withFailureHandler(function(err) {
+        if (failedChainFunction) failedChainFunction(err)
+      })
+      .withUserObject(this)
+      .setMeta(meta);
+  }
+
+  function afterPublishSuccess(successfulChainFunctions, failedChainFunction) {
+    showStatus("Successfully Published!", "success");
+    $("#sidebar-publish-button").removeAttr("disabled");
+  }
+  
+  function afterPublishFailure(err) {
+    showStatus("Failed to Publish", "failure", err.message);
+    $("#sidebar-publish-button").removeAttr("disabled");
+  }
+  
+  function afterSaveSuccess(successfulChainFunctions, failedChainFunction) {
+    showStatus("Successfully Saved!", "success");
+    $("#sidebar-save-button").removeAttr("disabled");
+  }
+  
+  function afterSaveFailure(err) {
+    showStatus("Failed to Save", "failure", err.message);
+    $("#sidebar-save-button").removeAttr("disabled");
+  }
+  
+  function commitDocument(successfulChainFunctions, failedChainFunction) {
+    google.script.run
+      .withSuccessHandler(function(url) {
+      
+        if (url) {
+          $("#sidebar-status-details").append(
+            $("<span />").text("View your published ")
+          ).append(
+            $("<a />").text("document here").attr("href", url).attr("target", "_blank")
+          );
+        }
+        
+        // -- Continue the Chain -- //
+        if (successfulChainFunctions && successfulChainFunctions.length > 0) {
+          var successfulChainFunction = successfulChainFunctions.shift();
+          successfulChainFunction(successfulChainFunctions, failedChainFunction);
+        }
+        
+      })
+      .withFailureHandler(function(err) {
+        if (failedChainFunction) failedChainFunction(err)
+      })
+      .withUserObject(this)
+      .commitToGithub(generateMetadata());
+  }
+  
+  /**
+   * Displays the given status message in the sidebar.
+   *
+   * @param {String} msg The status message to display.
+   * @param {String} classId The message type (class id) that the message
+   *   should be displayed as.
+   */
+  function showStatus(msg, classId, details) {
+    if (!msg) $("#sidebar-status-details").empty();
+    $('#sidebar-status').removeClass().html(msg);
+    if (details) {
+      $('#sidebar-status').attr("title", details);
+    } else {
+      $('#sidebar-status').removeAttr("title");
+    }
+    if (classId) {
+      $('#sidebar-status').addClass(classId);
+    }
+  }
+  
+  function showLoading(element, what) {
+    element.empty();
+    var message = "Loading ";
+    if (what) message = message + what + " ";
+    $("<li/>").addClass("loading").text(message += "...").appendTo(element);
+  }
+  
+  function showError(msg, element) {
+    if (element) element.empty();
+    showStatus(msg, 'error');
+  }
+  
+  function folderClick(event) {
+    if (this == event.target) {
+      var target = $(this);
+      if (target.prop("tagName").toUpperCase() != "LI") target = target.parent();
+      target.toggleClass("expanded");
+      if (target.hasClass("expanded")) {
+        showLoading($("<ul/>").appendTo(target), "Folders");
+        google.script.run
+          .withSuccessHandler(function(folders, element) {
+            element.empty();
+              for (var i = 0; i < folders.length; i++) {
+                if (folders[i].type == "folder") {
+                  var name_Span = $("<span />").text(folders[i].name).click(folderClick);
+                  if (folders[i].name.indexOf("posts") >= 0) name_Span.addClass("highlight");
+                  $("<li/>")
+                    .click(folderClick)
+                    .data("path", folders[i].path)
+                    .data("repo_name", target.data("repo_name"))
+                    .append($("<input />").addClass("repos").attr("type","checkbox").attr("checked", (current_Targets.indexOf(target.data("repo_name") + "::" + folders[i].path) >= 0)))
+                    .append(name_Span)
+                    .appendTo(element);
+                }
+              }
+              if (element.children().length == 0) {
+                element.parent().toggleClass("expanded");
+                element.parent().addClass("empty");
+                element.parent().attr("title", "This folder/repo doesn't have any sub-folders to show you!");
+                element.remove();
+              } else {
+                element.parent().parent().removeClass("empty");
+              }
+          })
+          .withFailureHandler(function(msg, element) {
+            if (msg && msg.message && msg.message.indexOf("This repository is empty.") >= 0) {
+              element.empty();
+              element.parent().addClass("err");
+              element.parent().attr("title", "This repository seems to be empty, you'll need to initialise it on Github first!");
+            }
+          })
+          .withUserObject(target.children("ul"))
+          .getFolders(target.data("repo_name"), target.data("path"));
+       } else {
+         target.children("ul").remove();
+       }
+    }
+  }
+ 
+  function generateMetadata() {
+    var value = "---\n";
+    
+    if ($("#title-text").val()) value = value.concat("title: ", $("#title-text").val(), "\n");
+    if ($("#type-text").val()) value = value.concat("layout: ", $("#type-text").val(), "\n");
+    if ($("#author-text").val()) value = value.concat("author: ", $("#author-text").val(), "\n");
+    if ($("#link-text").val()) value = value.concat("permalink: ", $("#link-text").val(), "\n");
+    
+    if (current_Tags && current_Tags.length > 0) {
+      value = value.concat("tags:", "\n");
+      for (var i = 0; i < current_Tags.length; i++) {
+        value = value.concat("- ", current_Tags[i].toLowerCase(), "\n");
+      }
+    }
+    
+    if ($("#arbitary-yaml").val()) value = value.concat($("#arbitary-yaml").val(), "\n")
+    if ($("#root").data("id")) value = value.concat("source-id: ", $("#root").data("id"), "\n")
+    
+    return value.concat("published: true\n", "---");
+  }
+  
+  function validateData() {
+    if (
+      ($("#title-text").val() && $("#title-text").val().length > 0) &&
+      ($("#file-name-text").val() && $("#file-name-text").val().length > 0) &&
+      ($("#type-text").val() && $("#type-text").val().length > 0) &&
+      (current_Targets && current_Targets.length > 0)
+    ) {
+      $("#sidebar-publish-button").removeAttr("disabled");
+    } else {
+      $("#sidebar-publish-button").attr("disabled","disabled");
+    }
+  }
+  
+</script>
